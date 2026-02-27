@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/fast_correlation_fx.dir/src/main_fx.cpp.o CMakeFiles/fast_correlation_fx.dir/src/fx_correlator.cu.o CMakeFiles/fast_correlation_fx.dir/src/dat_reader.cpp.o -o fast_correlation_fx   -L/usr/lib/x86_64-linux-gnu/stubs  -L/usr/lib/gcc/x86_64-linux-gnu/12  -lcufft -lcudadevrt -lcudart_static -lrt -lpthread -ldl 
