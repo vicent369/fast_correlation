@@ -4,6 +4,9 @@
 #include <cstdlib>
 #include <cmath>
 #include <time.h>
+#include <vector>
+#include <chrono>
+#include <unistd.h>
 
 // 添加头文件包含
 #include "fx_correlator.h"
@@ -49,7 +52,7 @@ __global__ void complex_multiply_conj_kernel(
     }
 }
 
-// ============ 新增：自相关内核（a * conj(a)） ============
+// 自相关内核（a * conj(a)）
 __global__ void auto_correlation_kernel_fx(
     Complex* a,
     Complex* result,
@@ -101,7 +104,9 @@ double get_time_ms() {
     return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
 }
 
-// FX相关器主函数（互相关）
+// ============ 原有函数（保持不变） ============
+
+// FX相关器主函数（互相关）- 非Stream版本
 extern "C" void gpu_fx_correlate(
     complex_t* h_sig1,
     complex_t* h_sig2,
@@ -220,7 +225,7 @@ extern "C" void gpu_fx_correlate(
     printf("GPU FX Correlator: Completed in %.2f ms\n", total_elapsed_ms);
 }
 
-// ============ 新增：自相关函数 ============
+// 自相关函数 - 非Stream版本
 extern "C" void gpu_fx_auto_correlate(
     complex_t* h_signal,
     int n_per_frame,
@@ -298,4 +303,256 @@ extern "C" void gpu_fx_auto_correlate(
     CUDA_CHECK(cudaFree(d_auto_accum));
     
     printf("GPU FX Auto-correlator: Completed\n");
+}
+
+// ============ 新增：Stream版本函数 ============
+
+// Stream版本互相关
+extern "C" void gpu_fx_correlate_stream(
+    complex_t* h_sig1,
+    complex_t* h_sig2,
+    int n_per_frame,
+    int num_frames,
+    complex_t* h_corr_out,
+    int normalize,
+    cudaStream_t stream
+) {
+    size_t frame_bytes = n_per_frame * sizeof(Complex);
+    
+    // 线程配置
+    int block_size = 256;
+    int grid_size = (n_per_frame + block_size - 1) / block_size;
+    
+    // 为这个流分配资源
+    Complex *d_frame1, *d_frame2;
+    Complex *d_fft1, *d_fft2;
+    Complex *d_corr_frame;
+    Complex *d_corr_accum;
+    
+    CUDA_CHECK(cudaMallocAsync(&d_frame1, frame_bytes, stream));
+    CUDA_CHECK(cudaMallocAsync(&d_frame2, frame_bytes, stream));
+    CUDA_CHECK(cudaMallocAsync(&d_fft1, frame_bytes, stream));
+    CUDA_CHECK(cudaMallocAsync(&d_fft2, frame_bytes, stream));
+    CUDA_CHECK(cudaMallocAsync(&d_corr_frame, frame_bytes, stream));
+    CUDA_CHECK(cudaMallocAsync(&d_corr_accum, frame_bytes, stream));
+    
+    // 初始化累积数组为0
+    CUDA_CHECK(cudaMemsetAsync(d_corr_accum, 0, frame_bytes, stream));
+    
+    // 创建FFT计划并绑定到流
+    cufftHandle plan;
+    cufftCreate(&plan);
+    cufftSetStream(plan, stream);
+    cufftPlan1d(&plan, n_per_frame, CUFFT_C2C, 1);
+    
+    // 处理每一帧
+    for (int frame_idx = 0; frame_idx < num_frames; frame_idx++) {
+        size_t offset = frame_idx * n_per_frame;
+        
+        // 异步传输当前帧
+        CUDA_CHECK(cudaMemcpyAsync(d_frame1, h_sig1 + offset, 
+                                   frame_bytes, cudaMemcpyHostToDevice, stream));
+        CUDA_CHECK(cudaMemcpyAsync(d_frame2, h_sig2 + offset, 
+                                   frame_bytes, cudaMemcpyHostToDevice, stream));
+        
+        // FFT（在同一个流中）
+        CUFFT_CHECK(cufftExecC2C(plan, d_frame1, d_fft1, CUFFT_FORWARD));
+        CUFFT_CHECK(cufftExecC2C(plan, d_frame2, d_fft2, CUFFT_FORWARD));
+        
+        // 互相关计算
+        complex_multiply_conj_kernel<<<grid_size, block_size, 0, stream>>>(
+            d_fft1, d_fft2, d_corr_frame, n_per_frame);
+        
+        // 累加
+        complex_accumulate_kernel<<<grid_size, block_size, 0, stream>>>(
+            d_corr_accum, d_corr_frame, n_per_frame);
+    }
+    
+    // 归一化
+    if (normalize) {
+        float scale = 1.0f / n_per_frame;
+        complex_scale_kernel<<<grid_size, block_size, 0, stream>>>(
+            d_corr_accum, scale, n_per_frame);
+    }
+    
+    // 结果传回CPU
+    CUDA_CHECK(cudaMemcpyAsync(h_corr_out, d_corr_accum, 
+                               frame_bytes, cudaMemcpyDeviceToHost, stream));
+    
+    // 等待这个流完成
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    
+    // 清理
+    cufftDestroy(plan);
+    CUDA_CHECK(cudaFreeAsync(d_frame1, stream));
+    CUDA_CHECK(cudaFreeAsync(d_frame2, stream));
+    CUDA_CHECK(cudaFreeAsync(d_fft1, stream));
+    CUDA_CHECK(cudaFreeAsync(d_fft2, stream));
+    CUDA_CHECK(cudaFreeAsync(d_corr_frame, stream));
+    CUDA_CHECK(cudaFreeAsync(d_corr_accum, stream));
+}
+
+// Stream版本自相关
+extern "C" void gpu_fx_auto_correlate_stream(
+    complex_t* h_signal,
+    int n_per_frame,
+    int num_frames,
+    complex_t* h_auto_out,
+    int normalize,
+    cudaStream_t stream
+) {
+    size_t frame_bytes = n_per_frame * sizeof(Complex);
+    
+    int block_size = 256;
+    int grid_size = (n_per_frame + block_size - 1) / block_size;
+    
+    Complex *d_frame, *d_fft, *d_auto_frame, *d_auto_accum;
+    
+    CUDA_CHECK(cudaMallocAsync(&d_frame, frame_bytes, stream));
+    CUDA_CHECK(cudaMallocAsync(&d_fft, frame_bytes, stream));
+    CUDA_CHECK(cudaMallocAsync(&d_auto_frame, frame_bytes, stream));
+    CUDA_CHECK(cudaMallocAsync(&d_auto_accum, frame_bytes, stream));
+    
+    CUDA_CHECK(cudaMemsetAsync(d_auto_accum, 0, frame_bytes, stream));
+    
+    cufftHandle plan;
+    cufftCreate(&plan);
+    cufftSetStream(plan, stream);
+    cufftPlan1d(&plan, n_per_frame, CUFFT_C2C, 1);
+    
+    for (int frame_idx = 0; frame_idx < num_frames; frame_idx++) {
+        size_t offset = frame_idx * n_per_frame;
+        
+        CUDA_CHECK(cudaMemcpyAsync(d_frame, h_signal + offset, 
+                                   frame_bytes, cudaMemcpyHostToDevice, stream));
+        
+        CUFFT_CHECK(cufftExecC2C(plan, d_frame, d_fft, CUFFT_FORWARD));
+        
+        auto_correlation_kernel_fx<<<grid_size, block_size, 0, stream>>>(
+            d_fft, d_auto_frame, n_per_frame);
+        
+        complex_accumulate_kernel<<<grid_size, block_size, 0, stream>>>(
+            d_auto_accum, d_auto_frame, n_per_frame);
+    }
+    
+    if (normalize) {
+        float scale = 1.0f / n_per_frame;
+        complex_scale_kernel<<<grid_size, block_size, 0, stream>>>(
+            d_auto_accum, scale, n_per_frame);
+    }
+    
+    CUDA_CHECK(cudaMemcpyAsync(h_auto_out, d_auto_accum, 
+                               frame_bytes, cudaMemcpyDeviceToHost, stream));
+    
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    
+    cufftDestroy(plan);
+    CUDA_CHECK(cudaFreeAsync(d_frame, stream));
+    CUDA_CHECK(cudaFreeAsync(d_fft, stream));
+    CUDA_CHECK(cudaFreeAsync(d_auto_frame, stream));
+    CUDA_CHECK(cudaFreeAsync(d_auto_accum, stream));
+}
+
+// 批量处理所有相关对（使用多个流并行）
+extern "C" void gpu_fx_correlate_batch(
+    std::vector<complex_t*>& h_channel_data,
+    std::vector<FxCorrelationPairResult>& all_pairs,
+    int n_per_frame,
+    int num_frames,
+    int normalize
+) {
+    int num_pairs = all_pairs.size();
+    int max_streams = std::min(num_pairs, 4);  // GTX 1080 Ti 建议最多4个流
+    
+    printf("  Using %d CUDA streams for parallel processing\n", max_streams);
+    
+    // 创建流
+    std::vector<cudaStream_t> streams(max_streams);
+    for (int i = 0; i < max_streams; i++) {
+        cudaStreamCreate(&streams[i]);
+    }
+    
+    // 记录每个流当前处理的对索引
+    std::vector<int> stream_task(max_streams, -1);
+    std::vector<bool> stream_busy(max_streams, false);
+    
+    int completed = 0;
+    int next_pair = 0;
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    while (completed < num_pairs) {
+        // 分配新任务到空闲流
+        for (int s = 0; s < max_streams; s++) {
+            if (!stream_busy[s] && next_pair < num_pairs) {
+                int pair_idx = next_pair++;
+                auto& pair = all_pairs[pair_idx];
+                
+                // 在指定流中启动任务
+                if (pair.type == FX_AUTO_CORRELATION) {
+                    gpu_fx_auto_correlate_stream(
+                        h_channel_data[pair.channel_i],
+                        n_per_frame, num_frames,
+                        pair.accumulated_spectrum.data(),
+                        normalize,
+                        streams[s]
+                    );
+                } else {
+                    gpu_fx_correlate_stream(
+                        h_channel_data[pair.channel_i],
+                        h_channel_data[pair.channel_j],
+                        n_per_frame, num_frames,
+                        pair.accumulated_spectrum.data(),
+                        normalize,
+                        streams[s]
+                    );
+                }
+                
+                stream_task[s] = pair_idx;
+                stream_busy[s] = true;
+            }
+        }
+        
+        // 检查完成的流
+        for (int s = 0; s < max_streams; s++) {
+            if (stream_busy[s]) {
+                cudaError_t err = cudaStreamQuery(streams[s]);
+                if (err != cudaErrorNotReady) {
+                    // 流已完成
+                    stream_busy[s] = false;
+                    completed++;
+                    
+                    // 计算该对的统计信息
+                    auto& pair = all_pairs[stream_task[s]];
+                    float total_power = 0;
+                    float max_mag = 0;
+                    int max_idx = 0;
+                    
+                    for (int i = 0; i < n_per_frame; i++) {
+                        float real = pair.accumulated_spectrum[i].x;
+                        float imag = pair.accumulated_spectrum[i].y;
+                        float mag = sqrtf(real*real + imag*imag);
+                        total_power += mag;
+                        if (mag > max_mag) {
+                            max_mag = mag;
+                            max_idx = i;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 避免CPU空转
+        usleep(1000);
+    }
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration<float, std::milli>(end_time - start_time);
+    
+    printf("  Batch processing completed in %.2f ms\n", duration.count());
+    
+    // 清理流
+    for (int i = 0; i < max_streams; i++) {
+        cudaStreamDestroy(streams[i]);
+    }
 }

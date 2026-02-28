@@ -175,19 +175,6 @@ fast_correlation_td_full/fast:
 .PHONY : fast_correlation_td_full/fast
 
 #=============================================================================
-# Target rules for targets named fast_correlation_fx
-
-# Build rule for target.
-fast_correlation_fx: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 fast_correlation_fx
-.PHONY : fast_correlation_fx
-
-# fast build rule for target.
-fast_correlation_fx/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx.dir/build.make CMakeFiles/fast_correlation_fx.dir/build
-.PHONY : fast_correlation_fx/fast
-
-#=============================================================================
 # Target rules for targets named fast_correlation_fx_multi
 
 # Build rule for target.
@@ -243,7 +230,6 @@ src/dat_reader.o: src/dat_reader.cpp.o
 # target to build an object file
 src/dat_reader.cpp.o:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_td_full.dir/build.make CMakeFiles/fast_correlation_td_full.dir/src/dat_reader.cpp.o
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx.dir/build.make CMakeFiles/fast_correlation_fx.dir/src/dat_reader.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx_multi.dir/build.make CMakeFiles/fast_correlation_fx_multi.dir/src/dat_reader.cpp.o
 .PHONY : src/dat_reader.cpp.o
 
@@ -253,7 +239,6 @@ src/dat_reader.i: src/dat_reader.cpp.i
 # target to preprocess a source file
 src/dat_reader.cpp.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_td_full.dir/build.make CMakeFiles/fast_correlation_td_full.dir/src/dat_reader.cpp.i
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx.dir/build.make CMakeFiles/fast_correlation_fx.dir/src/dat_reader.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx_multi.dir/build.make CMakeFiles/fast_correlation_fx_multi.dir/src/dat_reader.cpp.i
 .PHONY : src/dat_reader.cpp.i
 
@@ -263,7 +248,6 @@ src/dat_reader.s: src/dat_reader.cpp.s
 # target to generate assembly for a file
 src/dat_reader.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_td_full.dir/build.make CMakeFiles/fast_correlation_td_full.dir/src/dat_reader.cpp.s
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx.dir/build.make CMakeFiles/fast_correlation_fx.dir/src/dat_reader.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx_multi.dir/build.make CMakeFiles/fast_correlation_fx_multi.dir/src/dat_reader.cpp.s
 .PHONY : src/dat_reader.cpp.s
 
@@ -272,7 +256,6 @@ src/fx_correlator.o: src/fx_correlator.cu.o
 
 # target to build an object file
 src/fx_correlator.cu.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx.dir/build.make CMakeFiles/fast_correlation_fx.dir/src/fx_correlator.cu.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx_multi.dir/build.make CMakeFiles/fast_correlation_fx_multi.dir/src/fx_correlator.cu.o
 .PHONY : src/fx_correlator.cu.o
 
@@ -281,7 +264,6 @@ src/fx_correlator.i: src/fx_correlator.cu.i
 
 # target to preprocess a source file
 src/fx_correlator.cu.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx.dir/build.make CMakeFiles/fast_correlation_fx.dir/src/fx_correlator.cu.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx_multi.dir/build.make CMakeFiles/fast_correlation_fx_multi.dir/src/fx_correlator.cu.i
 .PHONY : src/fx_correlator.cu.i
 
@@ -290,7 +272,6 @@ src/fx_correlator.s: src/fx_correlator.cu.s
 
 # target to generate assembly for a file
 src/fx_correlator.cu.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx.dir/build.make CMakeFiles/fast_correlation_fx.dir/src/fx_correlator.cu.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx_multi.dir/build.make CMakeFiles/fast_correlation_fx_multi.dir/src/fx_correlator.cu.s
 .PHONY : src/fx_correlator.cu.s
 
@@ -317,30 +298,6 @@ src/fx_output.s: src/fx_output.cpp.s
 src/fx_output.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx_multi.dir/build.make CMakeFiles/fast_correlation_fx_multi.dir/src/fx_output.cpp.s
 .PHONY : src/fx_output.cpp.s
-
-src/main_fx.o: src/main_fx.cpp.o
-.PHONY : src/main_fx.o
-
-# target to build an object file
-src/main_fx.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx.dir/build.make CMakeFiles/fast_correlation_fx.dir/src/main_fx.cpp.o
-.PHONY : src/main_fx.cpp.o
-
-src/main_fx.i: src/main_fx.cpp.i
-.PHONY : src/main_fx.i
-
-# target to preprocess a source file
-src/main_fx.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx.dir/build.make CMakeFiles/fast_correlation_fx.dir/src/main_fx.cpp.i
-.PHONY : src/main_fx.cpp.i
-
-src/main_fx.s: src/main_fx.cpp.s
-.PHONY : src/main_fx.s
-
-# target to generate assembly for a file
-src/main_fx.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fast_correlation_fx.dir/build.make CMakeFiles/fast_correlation_fx.dir/src/main_fx.cpp.s
-.PHONY : src/main_fx.cpp.s
 
 src/main_fx_multi.o: src/main_fx_multi.cpp.o
 .PHONY : src/main_fx_multi.o
@@ -427,7 +384,6 @@ help:
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
 	@echo "... all_correlation"
-	@echo "... fast_correlation_fx"
 	@echo "... fast_correlation_fx_multi"
 	@echo "... fast_correlation_td_full"
 	@echo "... src/correlation_td.o"
@@ -442,9 +398,6 @@ help:
 	@echo "... src/fx_output.o"
 	@echo "... src/fx_output.i"
 	@echo "... src/fx_output.s"
-	@echo "... src/main_fx.o"
-	@echo "... src/main_fx.i"
-	@echo "... src/main_fx.s"
 	@echo "... src/main_fx_multi.o"
 	@echo "... src/main_fx_multi.i"
 	@echo "... src/main_fx_multi.s"

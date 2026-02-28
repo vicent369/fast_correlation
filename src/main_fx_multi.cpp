@@ -62,14 +62,67 @@ void compute_spectrum_stats(const complex_t* spectrum, int n,
     }
 }
 
-// 多通道频域处理函数
+// ============ 新增：一次性读取整个文件 ============
+float2_data* read_entire_file(const char* filename, size_t* num_samples) {
+    FILE* fp = fopen(filename, "rb");
+    if (!fp) {
+        printf("Error: Cannot open file %s\n", filename);
+        return nullptr;
+    }
+    
+    fseek(fp, 0, SEEK_END);
+    size_t file_size = ftell(fp);
+    rewind(fp);
+    
+    *num_samples = file_size / 4;  // 每个样本4字节
+    size_t total_samples = *num_samples;
+    
+    printf("    File size: %.2f MB, Samples: %zu\n", 
+           file_size / 1024.0 / 1024.0, total_samples);
+    
+    // 一次性读取所有原始数据
+    short* raw_data = (short*)malloc(file_size);
+    if (!raw_data) {
+        printf("Error: Failed to allocate memory for raw data\n");
+        fclose(fp);
+        return nullptr;
+    }
+    
+    size_t read_size = fread(raw_data, 1, file_size, fp);
+    fclose(fp);
+    
+    if (read_size != file_size) {
+        printf("Error: Failed to read entire file\n");
+        free(raw_data);
+        return nullptr;
+    }
+    
+    // 转换为复数
+    float2_data* complex_data = (float2_data*)malloc(total_samples * sizeof(float2_data));
+    if (!complex_data) {
+        printf("Error: Failed to allocate memory for complex data\n");
+        free(raw_data);
+        return nullptr;
+    }
+    
+    // 批量转换
+    for (size_t i = 0; i < total_samples; i++) {
+        complex_data[i].x = (float)raw_data[2*i];
+        complex_data[i].y = (float)raw_data[2*i + 1];
+    }
+    
+    free(raw_data);
+    return complex_data;
+}
+
+// 多通道频域处理函数（优化版 - 不保存原始数据）
 bool process_fx_multi_channel(const FxMultiChannelConfig& config,
                              int n_per_frame, int num_frames,
                              int normalize, size_t start_sample,
                              float sample_rate_hz = 100e6) {
     
     print_double_line(70, '=');
-    std::cout << "FX MULTI-CHANNEL PROCESSING (Frequency Domain)" << std::endl;
+    std::cout << "FX MULTI-CHANNEL PROCESSING (Frequency Domain) - OPTIMIZED" << std::endl;
     print_line(70, '=');
     
     printf("Number of channels: %d\n", config.num_channels);
@@ -78,11 +131,11 @@ bool process_fx_multi_channel(const FxMultiChannelConfig& config,
            config.num_channels * (config.num_channels - 1) / 2);
     printf("FFT points per frame: %d\n", n_per_frame);
     printf("Number of frames: %d\n", num_frames);
-    printf("Total samples per channel: %d\n", n_per_frame * num_frames);
+    printf("Total samples needed: %d\n", n_per_frame * num_frames);
     printf("Start sample offset: %zu\n\n", start_sample);
     
-    // 计算总样本数
-    size_t total_samples = n_per_frame * num_frames;
+    // 计算需要的样本数
+    size_t samples_needed = n_per_frame * num_frames;
     
     // 创建输出目录
     create_fx_output_directory("fx_multi_results");
@@ -98,11 +151,11 @@ bool process_fx_multi_channel(const FxMultiChannelConfig& config,
     // 保存配置
     save_fx_multi_channel_config(config, prefix + "_config.csv");
     
-    // 分配内存 - 所有通道的原始数据
-    printf("\nAllocating memory...\n");
+    // 分配处理用的内存
+    printf("\nAllocating processing memory...\n");
     std::vector<complex_t*> channel_data(config.num_channels, nullptr);
     for (int c = 0; c < config.num_channels; c++) {
-        channel_data[c] = (complex_t*)malloc(total_samples * sizeof(complex_t));
+        channel_data[c] = (complex_t*)malloc(samples_needed * sizeof(complex_t));
         if (!channel_data[c]) {
             printf("Error: Failed to allocate memory for channel %d\n", c);
             return false;
@@ -111,44 +164,67 @@ bool process_fx_multi_channel(const FxMultiChannelConfig& config,
     
     // 读取所有通道的数据
     printf("\nReading data from files...\n");
+    auto read_start = std::chrono::high_resolution_clock::now();
+    
     for (int c = 0; c < config.num_channels; c++) {
         printf("  Channel %d (%s):\n", c+1, config.channel_names[c].c_str());
         
-        size_t samples_read = 0;
-        for (int frame_idx = 0; frame_idx < num_frames; frame_idx++) {
-            size_t frame_start = start_sample + frame_idx * n_per_frame;
-            
-            float2_data* frame = read_dat_partial(config.channel_files[c].c_str(),
-                                                 frame_start, n_per_frame);
-            if (!frame) {
-                printf("Error: Failed to read frame %d from channel %d\n", frame_idx, c);
-                return false;
-            }
-            
-            size_t offset = frame_idx * n_per_frame;
-            for (int i = 0; i < n_per_frame; i++) {
-                channel_data[c][offset + i].x = frame[i].x;
-                channel_data[c][offset + i].y = frame[i].y;
-            }
-            
-            free_data(frame);
-            samples_read += n_per_frame;
-            
-            if (frame_idx % 100 == 0 && frame_idx > 0) {
-                printf("    Read %zu samples (%.1f%%)\n", 
-                       samples_read, samples_read * 100.0 / total_samples);
-            }
+        // 打开文件
+        FILE* fp = fopen(config.channel_files[c].c_str(), "rb");
+        if (!fp) {
+            printf("Error: Cannot open file %s\n", config.channel_files[c].c_str());
+            return false;
         }
-        printf("    Total samples read: %zu\n", samples_read);
         
-        // 保存原始数据（只按通道保存）
-        std::string raw_bin_filename = prefix + "_" + config.channel_names[c] + "_raw.bin";
-        FILE* fp = fopen(raw_bin_filename.c_str(), "wb");
-        if (fp) {
-            fwrite(channel_data[c], sizeof(complex_t), total_samples, fp);
+        // 定位到起始位置
+        size_t start_byte = start_sample * 4;  // 每个样本4字节
+        if (fseek(fp, start_byte, SEEK_SET) != 0) {
+            printf("Error: Failed to seek in file\n");
             fclose(fp);
-            printf("    ✓ Saved raw data to: %s\n", raw_bin_filename.c_str());
+            return false;
         }
+        
+        // 读取所有需要的样本
+        size_t bytes_to_read = samples_needed * 4;
+        short* raw_buffer = (short*)malloc(bytes_to_read);
+        if (!raw_buffer) {
+            printf("Error: Failed to allocate raw buffer\n");
+            fclose(fp);
+            return false;
+        }
+        
+        size_t bytes_read = fread(raw_buffer, 1, bytes_to_read, fp);
+        fclose(fp);
+        
+        if (bytes_read != bytes_to_read) {
+            printf("Warning: Read %zu of %zu bytes\n", bytes_read, bytes_to_read);
+            samples_needed = bytes_read / 4;
+            printf("  Adjusting to %zu samples\n", samples_needed);
+        }
+        
+        // 转换为complex_t格式
+        size_t samples_actual = bytes_read / 4;
+        for (size_t i = 0; i < samples_actual; i++) {
+            channel_data[c][i].x = (float)raw_buffer[2*i];
+            channel_data[c][i].y = (float)raw_buffer[2*i + 1];
+        }
+        
+        free(raw_buffer);
+        printf("    Loaded %zu samples\n", samples_actual);
+    }
+    
+    auto read_end = std::chrono::high_resolution_clock::now();
+    auto read_ms = std::chrono::duration<float, std::milli>(read_end - read_start).count();
+    
+    printf("Data loading time: %.2f ms (%.2f MB/s)\n", 
+           read_ms, (samples_needed * config.num_channels * 8) / read_ms / 1000);
+    
+    // 更新总样本数和帧数
+    size_t total_samples = samples_needed;
+    int actual_frames = total_samples / n_per_frame;
+    if (actual_frames != num_frames) {
+        printf("\nNote: Adjusted frames from %d to %d\n", num_frames, actual_frames);
+        num_frames = actual_frames;
     }
     
     // 创建所有相关对的结果容器
@@ -180,33 +256,42 @@ bool process_fx_multi_channel(const FxMultiChannelConfig& config,
         }
     }
     
-    // GPU计算
+    // GPU计算 - 使用批量处理
     printf("\nComputing FX correlations on GPU...\n");
+    gpu_fx_correlate_batch(channel_data, all_pairs, n_per_frame, num_frames, normalize);
+    
+    // 计算统计信息并保存结果
     auto total_start = std::chrono::high_resolution_clock::now();
     
     for (auto& pair : all_pairs) {
-        printf("  Processing %s...\n", pair.pair_name.c_str());
+        // 计算统计信息
+        float total_power = 0.0f;
+        float max_magnitude = 0.0f;
+        int max_index = 0;
         
-        if (pair.type == FX_AUTO_CORRELATION) {
-            // 自相关
-            gpu_fx_auto_correlate(channel_data[pair.channel_i],
-                                 n_per_frame, num_frames,
-                                 pair.accumulated_spectrum.data(),
-                                 normalize);
-        } else {
-            // 互相关
-            gpu_fx_correlate(channel_data[pair.channel_i],
-                           channel_data[pair.channel_j],
-                           n_per_frame, num_frames,
-                           pair.accumulated_spectrum.data(),
-                           normalize);
+        for (int i = 0; i < n_per_frame; i++) {
+            float real = pair.accumulated_spectrum[i].x;
+            float imag = pair.accumulated_spectrum[i].y;
+            float mag = sqrtf(real*real + imag*imag);
+            total_power += mag;
+            if (mag > max_magnitude) {
+                max_magnitude = mag;
+                max_index = i;
+            }
         }
         
-        // 计算统计信息
-        compute_spectrum_stats(pair.accumulated_spectrum.data(), n_per_frame,
-                              sample_rate_hz, pair.total_power,
-                              pair.max_magnitude, pair.max_index,
-                              pair.max_freq_hz);
+        float freq_resolution = sample_rate_hz / n_per_frame;
+        float max_freq_hz;
+        if (max_index <= n_per_frame/2) {
+            max_freq_hz = max_index * freq_resolution;
+        } else {
+            max_freq_hz = (max_index - n_per_frame) * freq_resolution;
+        }
+        
+        pair.total_power = total_power;
+        pair.max_magnitude = max_magnitude;
+        pair.max_index = max_index;
+        pair.max_freq_hz = max_freq_hz;
         
         // 保存结果
         std::string bin_filename = prefix + "_" + pair.pair_name + "_spectrum.bin";
@@ -217,9 +302,6 @@ bool process_fx_multi_channel(const FxMultiChannelConfig& config,
         save_fx_complex_spectrum_csv(pair.accumulated_spectrum.data(),
                                     n_per_frame, sample_rate_hz,
                                     csv_filename, pair.pair_name);
-        
-        printf("    Max magnitude: %.3e at %.2f MHz\n", 
-               pair.max_magnitude, pair.max_freq_hz / 1e6);
     }
     
     auto total_end = std::chrono::high_resolution_clock::now();
@@ -245,9 +327,12 @@ bool process_fx_multi_channel(const FxMultiChannelConfig& config,
     std::cout << "FX MULTI-CHANNEL PROCESSING COMPLETE" << std::endl;
     print_line(60, '=');
     
-    printf("Processing time: %.2f ms\n", stats.processing_time_ms);
+    printf("Data loading: %.2f ms\n", read_ms);
+    printf("GPU processing: %.2f ms\n", total_duration.count());
+    printf("Total time: %.2f ms\n", read_ms + total_duration.count());
     printf("Processing rate: %.2f MS/s\n", stats.processing_rate_msps);
     printf("\nResults saved to: fx_multi_results/\n");
+    printf("Note: Raw data NOT saved (disabled for performance)\n");
     
     // 显示各对结果
     printf("\nSpectrum Statistics:\n");
@@ -266,10 +351,10 @@ bool process_fx_multi_channel(const FxMultiChannelConfig& config,
     return true;
 }
 
-// 主函数
+// 主函数（保持不变）
 int main(int argc, char** argv) {
     print_line(70, '=');
-    std::cout << "FX MULTI-CHANNEL CORRELATOR (Frequency Domain)" << std::endl;
+    std::cout << "FX MULTI-CHANNEL CORRELATOR (Frequency Domain) - OPTIMIZED" << std::endl;
     print_line(70, '=');
     std::cout << std::endl;
     
@@ -345,12 +430,12 @@ int main(int argc, char** argv) {
     printf("Processing parameters:\n");
     printf("  FFT points per frame: %d\n", n_per_frame);
     printf("  Number of frames: %d\n", num_frames);
-    printf("  Total samples: %d\n", n_per_frame * num_frames);
+    printf("  Total samples needed: %d\n", n_per_frame * num_frames);
     printf("  Start sample offset: %zu\n\n", start_sample);
     
     // 处理
     bool success = process_fx_multi_channel(config, n_per_frame, num_frames,
-                                           1, start_sample, 100e6);
+                                           0, start_sample, 100e6);
     
     if (success) {
         printf("\n✅ FX Multi-channel processing completed successfully!\n");

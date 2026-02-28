@@ -177,13 +177,13 @@ bool process_multi_channel(const MultiChannelConfig& config,
                 // 自相关
                 gpu_auto_correlate_td(channel_data[pair.channel_i],
                                      current_chunk_size, fft_size,
-                                     result, true);
+                                     result, false);
             } else {
                 // 互相关
                 gpu_correlate_td(channel_data[pair.channel_i],
                                 channel_data[pair.channel_j],
                                 current_chunk_size, fft_size,
-                                result, true);
+                                result, false);
             }
             
             // 找峰值
@@ -356,7 +356,7 @@ bool test_small_batch_td(const char* file1, const char* file2,
     std::cout << "Computing correlation on GPU..." << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
     
-    gpu_correlate_td(sig1_test, sig2_test, test_size, fft_size, result, true);
+    gpu_correlate_td(sig1_test, sig2_test, test_size, fft_size, result, false);
     
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration<float, std::milli>(end - start);

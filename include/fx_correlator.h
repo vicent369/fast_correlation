@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <ctime>
+#include <cuda_runtime.h>  // 添加CUDA运行时头文件
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,7 +16,7 @@ typedef struct {
     float y;  // 虚部/Q分量
 } complex_t;
 
-// ============ 新增：多通道相关结果结构 ============
+// ============ 多通道相关结果结构 ============
 
 // 相关类型枚举
 enum FxCorrelationType {
@@ -110,6 +111,62 @@ void gpu_fx_auto_correlate(
     int n_per_frame,
     int num_frames,
     complex_t* h_auto_out,
+    int normalize
+);
+
+// ============ Stream版本函数声明 ============
+
+/**
+ * FX相关器 - Stream版本（支持多个流并行）
+ * @param h_sig1      输入信号1
+ * @param h_sig2      输入信号2
+ * @param n_per_frame 每帧样本数
+ * @param num_frames  累积帧数
+ * @param h_corr_out  输出谱
+ * @param normalize   是否归一化
+ * @param stream      CUDA流
+ */
+void gpu_fx_correlate_stream(
+    complex_t* h_sig1,
+    complex_t* h_sig2,
+    int n_per_frame,
+    int num_frames,
+    complex_t* h_corr_out,
+    int normalize,
+    cudaStream_t stream
+);
+
+/**
+ * 自相关函数 - Stream版本
+ * @param h_signal    输入信号
+ * @param n_per_frame 每帧样本数
+ * @param num_frames  累积帧数
+ * @param h_auto_out  输出谱
+ * @param normalize   是否归一化
+ * @param stream      CUDA流
+ */
+void gpu_fx_auto_correlate_stream(
+    complex_t* h_signal,
+    int n_per_frame,
+    int num_frames,
+    complex_t* h_auto_out,
+    int normalize,
+    cudaStream_t stream
+);
+
+/**
+ * 批量处理所有相关对（使用多个流并行）
+ * @param h_channel_data 所有通道的数据
+ * @param all_pairs      所有相关对
+ * @param n_per_frame    每帧样本数
+ * @param num_frames     累积帧数
+ * @param normalize      是否归一化
+ */
+void gpu_fx_correlate_batch(
+    std::vector<complex_t*>& h_channel_data,
+    std::vector<FxCorrelationPairResult>& all_pairs,
+    int n_per_frame,
+    int num_frames,
     int normalize
 );
 

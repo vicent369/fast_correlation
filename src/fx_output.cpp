@@ -108,7 +108,7 @@ bool save_fx_multi_channel_config(const FxMultiChannelConfig& config,
     return true;
 }
 
-// 保存频域多通道统计摘要（文本格式）
+// 保存频域多通道统计摘要（文本格式）- 不保存原始数据的版本
 bool save_fx_multi_channel_summary_txt(const FxMultiChannelStats& stats,
                                        const std::string& filename) {
     FILE* fp = fopen(filename.c_str(), "w");
@@ -131,11 +131,12 @@ bool save_fx_multi_channel_summary_txt(const FxMultiChannelStats& stats,
             stats.config.num_channels * (stats.config.num_channels - 1) / 2);
     fprintf(fp, "  FFT points per frame : %d\n", stats.n_per_frame);
     fprintf(fp, "  Number of frames     : %d\n", stats.num_frames);
-    fprintf(fp, "  Total samples        : %zu (%.1f MB per channel)\n", 
+    fprintf(fp, "  Total samples        : %zu (%.1f GB per channel)\n", 
             stats.total_samples,
-            stats.total_samples * sizeof(complex_t) / 1024.0 / 1024.0);
+            stats.total_samples * sizeof(complex_t) / 1024.0 / 1024.0 / 1024.0);
     fprintf(fp, "  Processing time      : %.2f ms\n", stats.processing_time_ms);
-    fprintf(fp, "  Processing rate      : %.2f MS/s\n\n", stats.processing_rate_msps);
+    fprintf(fp, "  Processing rate      : %.2f MS/s\n", stats.processing_rate_msps);
+    fprintf(fp, "  Raw data saving      : Disabled (for performance)\n\n");
     
     // 通道配置
     fprintf(fp, "2. CHANNEL CONFIGURATION\n");
@@ -165,49 +166,40 @@ bool save_fx_multi_channel_summary_txt(const FxMultiChannelStats& stats,
         fprintf(fp, "          Total power      : %.6e\n", pair.total_power);
         fprintf(fp, "          Maximum magnitude: %.6e at index %d\n", 
                 pair.max_magnitude, pair.max_index);
-        fprintf(fp, "          Frequency at max : %.1f Hz (%.3f MHz)\n", 
-                pair.max_freq_hz, pair.max_freq_hz/1e6);
+        fprintf(fp, "          Frequency at max : %.2f MHz\n", 
+                pair.max_freq_hz / 1e6);
         fprintf(fp, "          Average magnitude: %.6e\n", 
                 pair.total_power / pair.spectrum_size);
         fprintf(fp, "          Frequency points : %d\n\n", pair.spectrum_size);
     }
     
-    // 输出文件列表
+    // 输出文件列表 - 修改后只列出实际生成的文件
     fprintf(fp, "4. OUTPUT FILES\n");
     fprintf(fp, "------------------\n");
     
     std::string prefix = filename.substr(0, filename.find_last_of("_"));
+    prefix = prefix.substr(0, prefix.find_last_of("_"));
     
     fprintf(fp, "\n  4.1 Configuration Files:\n");
     fprintf(fp, "      %s_config.csv\n", prefix.c_str());
     fprintf(fp, "          Description: Channel configuration information\n");
-    fprintf(fp, "          Format: CSV\n\n");
+    fprintf(fp, "          Format: CSV\n");
+    fprintf(fp, "          Contents: Channel index, channel name, file path\n\n");
     
     fprintf(fp, "  4.2 Summary Files:\n");
     fprintf(fp, "      %s_summary.txt\n", prefix.c_str());
     fprintf(fp, "          Description: This human-readable summary file\n");
-    fprintf(fp, "          Format: Text\n\n");
+    fprintf(fp, "          Format: Text\n");
+    fprintf(fp, "          Contents: Complete processing information and statistics\n\n");
     
-    fprintf(fp, "  4.3 Raw Signal Data:\n");
-    for (int i = 0; i < stats.config.num_channels; i++) {
-        fprintf(fp, "      %s_%s_raw.bin\n", 
-                prefix.c_str(), stats.config.channel_names[i].c_str());
-        fprintf(fp, "          Description: Raw signal data for channel %s\n",
-                stats.config.channel_names[i].c_str());
-        fprintf(fp, "          Format: Binary (complex_t structure)\n");
-        fprintf(fp, "          Size: %zu samples (%.1f MB)\n\n", 
-                stats.total_samples,
-                stats.total_samples * sizeof(complex_t) / 1024.0 / 1024.0);
-    }
-    
-    fprintf(fp, "  4.4 Correlation Spectra:\n");
+    fprintf(fp, "  4.3 Correlation Spectra:\n");
     for (const auto& pair : stats.pairs) {
         fprintf(fp, "      %s_%s_spectrum.bin\n", 
                 prefix.c_str(), pair.pair_name.c_str());
         fprintf(fp, "          Description: Complex cross-power spectrum for %s\n",
                 pair.pair_name.c_str());
         fprintf(fp, "          Format: Binary (complex_t array)\n");
-        fprintf(fp, "          Size: %d frequency points (%.1f MB)\n", 
+        fprintf(fp, "          Size: %d frequency points (%.2f MB)\n", 
                 pair.spectrum_size,
                 pair.spectrum_size * sizeof(complex_t) / 1024.0 / 1024.0);
         
@@ -218,7 +210,33 @@ bool save_fx_multi_channel_summary_txt(const FxMultiChannelStats& stats,
         fprintf(fp, "          Columns: frequency_index, frequency_hz, real_part, imag_part, magnitude, phase_deg\n\n");
     }
     
-    fprintf(fp, "================================================================================\n");
+    // 文件统计
+    fprintf(fp, "5. FILE STATISTICS\n");
+    fprintf(fp, "------------------\n");
+    
+    int total_files = 1 +  // config.csv
+                      1 +  // summary.txt
+                      2 * stats.pairs.size();  // spectrum.bin + spectrum.csv per pair
+    
+    fprintf(fp, "  Total files generated : %d\n", total_files);
+    fprintf(fp, "  Configuration files   : 1\n");
+    fprintf(fp, "  Summary files         : 1\n");
+    fprintf(fp, "  Spectrum files        : %d (%d pairs × 2 formats)\n\n", 
+            2 * (int)stats.pairs.size(), (int)stats.pairs.size());
+    
+    fprintf(fp, "  Note: Raw signal data files are NOT saved (disabled for performance)\n\n");
+    
+    // 使用建议
+    fprintf(fp, "6. USAGE NOTES\n");
+    fprintf(fp, "------------------\n");
+    fprintf(fp, "  - Spectrum files contain the accumulated cross-power spectrum\n");
+    fprintf(fp, "  - Binary files are suitable for fast loading in MATLAB/Python\n");
+    fprintf(fp, "  - CSV files can be opened in Excel or other spreadsheet software\n");
+    fprintf(fp, "  - The spectrum shows power distribution across frequencies\n");
+    fprintf(fp, "  - Frequency resolution = sample_rate / FFT_size = %.2f Hz\n", 
+            stats.sample_rate_hz / stats.n_per_frame);
+    
+    fprintf(fp, "\n================================================================================\n");
     
     fclose(fp);
     printf("  ✓ Saved FX summary to: %s\n", filename.c_str());

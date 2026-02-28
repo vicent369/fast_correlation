@@ -46,47 +46,6 @@ if(BUILD_TD_FULL)
     message(STATUS "Building time-domain full version: fast_correlation_td_full")
 endif()
 
-# ============ FX相关器版本（双通道） ============
-set(BUILD_FX TRUE)
-
-# 检查FX相关器文件是否存在
-if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/main_fx.cpp)
-    message(WARNING "File src/main_fx.cpp not found. FX correlator will not be built.")
-    set(BUILD_FX FALSE)
-endif()
-
-if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/fx_correlator.cu)
-    message(WARNING "File src/fx_correlator.cu not found. FX correlator will not be built.")
-    set(BUILD_FX FALSE)
-endif()
-
-if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/dat_reader.cpp)
-    message(WARNING "File src/dat_reader.cpp not found. FX correlator will not be built.")
-    set(BUILD_FX FALSE)
-endif()
-
-if(BUILD_FX)
-    message(STATUS "Building FX correlator (dual-channel): fast_correlation_fx")
-    
-    add_executable(fast_correlation_fx
-        src/main_fx.cpp
-        src/fx_correlator.cu
-        src/dat_reader.cpp
-    )
-    
-    target_include_directories(fast_correlation_fx PRIVATE include)
-    target_link_libraries(fast_correlation_fx PRIVATE cufft)
-    
-    # 为CUDA文件设置单独的语言
-    set_source_files_properties(src/fx_correlator.cu PROPERTIES LANGUAGE CUDA)
-    
-    # 创建输出目录的构建后命令
-    add_custom_command(TARGET fast_correlation_fx POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "fx_correlation_results"
-        COMMENT "Creating output directory for FX correlator results"
-    )
-endif()
-
 # ============ 新增：FX相关器多通道版本 ============
 set(FX_MULTI_SOURCES
     src/main_fx_multi.cpp
@@ -131,10 +90,6 @@ if(BUILD_TD_FULL)
     install(TARGETS fast_correlation_td_full DESTINATION bin)
 endif()
 
-if(BUILD_FX)
-    install(TARGETS fast_correlation_fx DESTINATION bin)
-endif()
-
 if(BUILD_FX_MULTI)
     install(TARGETS fast_correlation_fx_multi DESTINATION bin)
 endif()
@@ -146,10 +101,6 @@ add_custom_target(all_correlation
 
 if(BUILD_TD_FULL)
     add_dependencies(all_correlation fast_correlation_td_full)
-endif()
-
-if(BUILD_FX)
-    add_dependencies(all_correlation fast_correlation_fx)
 endif()
 
 if(BUILD_FX_MULTI)
